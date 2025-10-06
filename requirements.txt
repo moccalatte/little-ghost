@@ -1,0 +1,13 @@
+# Telegram Bot & Userbot Libraries
+python-telegram-bot
+Telethon
+
+# Environment Variable Management
+python-dotenv
+
+# Google Sheets API Integration
+gspread
+oauth2client
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
