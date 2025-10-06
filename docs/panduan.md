@@ -1,0 +1,1 @@
+# berisi cara pakai menjalankan projek beginner friendly
