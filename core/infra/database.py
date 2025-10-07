@@ -71,10 +71,22 @@ def initialize_database():
             telegram_group_id INTEGER NOT NULL,
             group_name TEXT,
             access_hash TEXT, -- Diperlukan untuk beberapa operasi Telethon
+            group_type TEXT, -- 'group' atau 'channel'
+            username TEXT,
             UNIQUE(userbot_id, telegram_group_id),
             FOREIGN KEY(userbot_id) REFERENCES userbots(id)
         )
         """)
+
+        # Pastikan kolom baru tersedia pada instalasi lama.
+        try:
+            cursor.execute("ALTER TABLE groups ADD COLUMN group_type TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            cursor.execute("ALTER TABLE groups ADD COLUMN username TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         conn.commit()
         logger.info("Database berhasil diinisialisasi. Semua tabel sudah siap.")

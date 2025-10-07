@@ -15,6 +15,10 @@ data/
 # Session files
 *.session
 
+# Credentials (keep folder but ignore actual secrets)
+credentials/
+!credentials/.gitkeep
+
 # Log files
 logs/
 
@@ -24,3 +28,4 @@ logs/
 dist/
 build/
 *.egg-info/
+.venv/
