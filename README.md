@@ -16,6 +16,7 @@ Sistem ini terdiri dari dua komponen utama:
 - **Logging Terperinci**: Aktivitas dicatat ke dalam file log untuk kemudahan debugging.
 - **Log Percakapan per Admin**: Setiap interaksi wizard disimpan di `logs/wizard/users/{telegram_id}.log` agar mudah ditinjau.
 - **Automated QA**: Menu Admin menyediakan pengujian otomatis berurutan untuk memastikan seluruh perintah userbot tetap berjalan setelah perubahan.
+- **Keyword Rules 🎯**: Auto Reply & Watcher kini mendukung pilihan kata spesifik, mode AND/OR, dan panduan wizard yang ramah anak.
 
 ---
 
@@ -137,32 +138,6 @@ Jika Anda ingin menempel pada log tanpa batas waktu dan memastikan skrip hanya d
 
 Skrip ini meminta konfirmasi interaktif dan secara otomatis meneruskan opsi `--follow-logs`, sehingga log akan terus mengalir sampai Anda menekan `Ctrl+C`. Skrip ini juga memiliki timeout default 2 jam (7200 detik) untuk mencegah proses berjalan terlalu lama tanpa pengawasan.
 
-### Jalankan Wizard dan Userbot Secara Terpisah
-
-Untuk debugging atau pengujian, Anda dapat menjalankan Wizard dan Userbot secara terpisah:
-
-**Jalankan hanya Wizard Bot:**
-```bash
-./scripts/run_wizard.sh
-```
-
-**Jalankan hanya Userbot Service:**
-```bash
-./scripts/run_userbot.sh
-```
-
-Setiap skrip memiliki mekanisme PID management sendiri untuk mencegah multiple instance. Jika Anda mencoba menjalankan instance yang sama dua kali, skrip akan menampilkan pesan error dan meminta Anda untuk menghentikan instance yang sedang berjalan terlebih dahulu.
-
-### Mode Tanpa Timeout (khusus user)
-
-Jika Anda ingin menempel pada log tanpa batas waktu dan memastikan skrip hanya dijalankan manual, gunakan wrapper berikut:
-
-```bash
-./scripts/dev_dre.sh
-```
-
-Skrip ini meminta konfirmasi interaktif dan secara otomatis meneruskan opsi `--follow-logs`, sehingga log akan terus mengalir sampai Anda menekan `Ctrl+C`.
-
 ---
 
 ## Panduan Penggunaan
@@ -184,7 +159,7 @@ Skrip ini meminta konfirmasi interaktif dan secara otomatis meneruskan opsi `--f
 ### Langkah 3: Kelola Userbot
 1. Pilih **"🛠️ Kelola Userbot"**, kemudian pilih userbot yang ingin dikelola melalui daftar yang muncul.
 2. Keyboard balasan menampilkan tombol perintah: `🤖 Auto Reply`, `👀 Watcher`, `📢 Broadcast`, `📊 Job Status`, `⛔ Stop Jobs`, `🆘 Help`, serta opsi `🤖 Choose Userbot` dan `⬅️ Back`.
-3. Setiap tombol memulai percakapan singkat sehingga admin diarahkan step-by-step (misal memilih grup, mengisi kata kunci, menentukan jadwal broadcast).
+3. Setiap tombol memulai percakapan singkat sehingga admin diarahkan step-by-step—termasuk memilih cara baca kata (spesifik vs potongan) dan mode AND/OR untuk Auto Reply & Watcher.
 4. Wizard menyimpan instruksi ke tabel `tasks` dan Userbot Service mengeksekusinya secara asinkron. Status terbaru bisa dilihat melalui tombol `📊 Job Status`, sedangkan `⛔ Stop Jobs` menandai task aktif agar worker menghentikannya dengan aman.
 5. Gunakan `📜 Watcher Logs` di dalam menu Watcher untuk melihat 8 eksekusi watcher terbaru lengkap dengan status, jumlah hit, serta catatan error (Google Sheets maupun sistem).
 
@@ -196,7 +171,7 @@ Skrip ini meminta konfirmasi interaktif dan secara otomatis meneruskan opsi `--f
 - Jika kredensial tidak ditemukan atau sheet tidak dapat diakses, job akan gagal dengan status error serta catatan di log `logs/userbot/jobs/watcher/<process_id>.log`.
 
 ### Menu Tambahan
-- **⚙️ Admin Setting** kini menyediakan `🧪 Automated Testing` (dry-run semua perintah utama dan menulis hasil ke `logs/userbot/jobs/auto_test/<process_id>.log`) serta `👷 Manage Userbot (WIP)` dengan utilitas `📂 Sync Users Groups` (sinkronisasi seluruh grup/kanal setiap userbot dan penulisan log incremental `logs/admin/sync_<telegram_id>.log`).
+- **⚙️ Admin Setting** kini menyediakan `🧪 Automated Testing` (dry-run semua perintah utama dan menulis hasil ke `logs/userbot/jobs/auto_test/<process_id>.log`) lengkap dengan pilihan cakupan `Test all groups & channels` atau `Test specific groups/channels`, serta `👷 Manage Userbot (WIP)` dengan utilitas `📂 Sync Users Groups` (sinkronisasi seluruh grup/kanal setiap userbot dan penulisan log incremental `logs/admin/sync_<telegram_id>.log`).
 - **📚 Bantuan** merangkum fitur penting dan tautan ke menu utama.
 
 ### Tips

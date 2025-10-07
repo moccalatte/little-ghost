@@ -131,12 +131,13 @@ little-ghost/
 ### 6.1 🤖 Auto Reply
 - Wizard memandu admin memilih cakupan target melalui tombol: `🌐 All Groups`, `📡 All Channels`, atau `🎯 Specific Targets` (memasukkan ID chat tanpa prefiks `-100`, disertai tutor singkat cara mengambil ID).
 - Setelah itu admin mengisi kata kunci pemicu. Format seperti `need tanpa nut` otomatis menambahkan pengecualian. Wizard juga menyediakan tombol untuk menambah pengecualian secara manual atau melewatinya.
+- Wizard kemudian menampilkan pilihan `🔍 Spesifik (kata harus utuh)` atau `🧩 Boleh potongan kata`, dilanjutkan opsi `🙂 Minimal satu kata cocok` atau `✅ Semua kata harus muncul`. Langkah yang sama diterapkan pada pengecualian sehingga admin bisa memilih mode AND/OR maupun gaya pencocokan kata larangan.
 - Langkah terakhir adalah menuliskan pesan balasan. Tombol `⬅️ Back` selalu tampil sehingga admin bisa kembali ke menu kapan saja.
 - Userbot memasang handler `Telethon.events.NewMessage` per target, mencatat setiap hit di `details.replied_count`, dan menyimpan log di `logs/userbot/jobs/auto_reply/<process_id>.log`.
 
 ### 6.2 👀 Watcher
 - Menu Watcher kini menawarkan dua aksi: `➕ Buat Watcher` untuk membuat rule baru dan `📜 Watcher Logs` untuk menampilkan ringkasan 8 task watcher terbaru (status, total hit, catatan error Google Sheets maupun sistem).
-- Alur pembuatan watcher mirip Auto Reply: pilih cakupan target, tentukan kata kunci, dan opsional menambahkan pengecualian.
+- Alur pembuatan watcher mirip Auto Reply: pilih cakupan target, tentukan kata kunci, pilih gaya pencocokan (`Spesifik` vs `Boleh potongan kata`), serta mode AND/OR baik untuk kata kunci maupun pengecualian. Wizard juga menyediakan tombol untuk menambah pengecualian secara manual atau melewatinya.
 - Wizard kemudian meminta tujuan pencatatan (`🗂 Local Log` atau `📄 Google Sheets`) serta label watcher. Jika memilih Sheets admin memasukkan ID/URL sheet; wizard juga menampilkan tutor singkat:
   1. Aktifkan Google Sheets API & buat Service Account.
   2. Simpan kredensial JSON ke `credentials/service_account.json` (ikon di struktur proyek sudah disediakan) — folder ini di-ignore git, jadi aman menaruh file lokal.
@@ -171,6 +172,8 @@ little-ghost/
 
 ### 6.8 Admin Auto Test
 - Task `auto_test` menjalankan urutan: Sync Groups → Auto Reply → Watcher → Broadcast dalam mode dry-run. Untuk broadcast, konten dikirim sebagai pesan manual sehingga alur terbaru tetap tervalidasi.
+- Sebelum menjadwalkan task, wizard meminta cakupan uji melalui tombol `Test all groups & channels` atau `Test specific groups/channels (enter IDs)`, kemudian mengubah input custom menjadi daftar ID Telegram (lengkap dengan prefiks `-100`).
+- Rutin uji membuat dua kombinasi Auto Reply & Watcher (mode contains/any dan specific/all, lengkap dengan variasi pengecualian) agar seluruh opsi rule baru tervalidasi.
 - Setiap langkah dicatat ke `details.auto_test` dan ke file `logs/userbot/jobs/auto_test/<process_id>.log` untuk memudahkan debugging regresi.
 
 ---

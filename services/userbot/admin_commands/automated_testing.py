@@ -20,6 +20,11 @@ class AutomatedTestingCommand(UserbotCommand):
         logger = ctx.logger
         await ctx.update_status('running', 'Automated testing started')
         results: List[Dict[str, Any]] = []
+        details = ctx.details or {}
+        scope = str(details.get('testing_scope') or 'all').lower()
+        raw_targets = details.get('testing_targets')
+        if not isinstance(raw_targets, list):
+            raw_targets = []
 
         async def record(step: str, status: str, note: str | None = None, extra: Dict[str, Any] | None = None) -> None:
             entry = {
@@ -41,9 +46,13 @@ class AutomatedTestingCommand(UserbotCommand):
 
         try:
             await self._prepare_groups(ctx, record)
-            await self._run_auto_reply(ctx, record)
-            await self._run_watcher(ctx, record)
-            await self._run_broadcast(ctx, record)
+            target_pool = self._resolve_target_pool(ctx.userbot_id, scope, raw_targets)
+            if not target_pool:
+                raise RuntimeError('No chat targets available for automated testing.')
+
+            await self._run_auto_reply(ctx, record, target_pool, scope)
+            await self._run_watcher(ctx, record, target_pool, scope)
+            await self._run_broadcast(ctx, record, target_pool, scope)
             await self._snapshot_tasks(ctx, record)
             await ctx.update_status('completed', 'Automated testing finished')
             logger.info("Automated testing finished successfully.")
@@ -66,51 +75,106 @@ class AutomatedTestingCommand(UserbotCommand):
         await record('sync_groups', 'completed', f"Synced {len(groups)} groups")
         logger.info("[auto_test] Synced %s groups", len(groups))
 
-    async def _run_auto_reply(self, ctx: CommandContext, record) -> None:
-        groups = self._fetch_groups(ctx.userbot_id)
-        if not groups:
-            raise RuntimeError('No groups available for auto-reply dry run.')
-        target = int(groups[0]['telegram_group_id'])
-        keywords = ['autotest', 'little ghost']
-        details = {
-            'targets': [target],
-            'keywords': keywords,
-            'exclusions': ['ignore_me'],
-            'reply_text': 'Automated test response 👻',
-            'scope': 'custom',
-        }
-        await record('auto_reply', 'running', f"Target chat {target}")
-        sub_ctx = self._sub_context(ctx, 'auto_test.auto_reply', details)
-        handle = await self._registry['auto_reply'].start(sub_ctx)
-        if handle:
-            await asyncio.sleep(2)
-            await self._registry['auto_reply'].stop(handle, sub_ctx)
-        await record('auto_reply', 'completed', f"Keywords: {', '.join(keywords)}")
+    async def _run_auto_reply(self, ctx: CommandContext, record, target_pool: List[int], scope: str) -> None:
+        if not target_pool:
+            raise RuntimeError('No chats available for auto-reply dry run.')
 
-    async def _run_watcher(self, ctx: CommandContext, record) -> None:
-        groups = self._fetch_groups(ctx.userbot_id)
-        if not groups:
-            raise RuntimeError('No groups available for watcher dry run.')
-        target = int(groups[-1]['telegram_group_id'])
-        details = {
-            'targets': [target],
-            'keywords': ['watch_me', 'alert'],
-            'exclusions': ['mute'],
-            'destination': {'mode': 'local', 'sheet_ref': None},
-            'label': 'AutoTest Watcher',
-            'scope': 'custom',
-        }
-        await record('watcher', 'running', f"Target chat {target}")
-        sub_ctx = self._sub_context(ctx, 'auto_test.watcher', details)
-        handle = await self._registry['watcher'].start(sub_ctx)
-        if handle:
-            await asyncio.sleep(2)
-            await self._registry['watcher'].stop(handle, sub_ctx)
-        await record('watcher', 'completed', 'Watcher active for dry run')
+        cases = [
+            {
+                'label': 'contains_any',
+                'keywords': ['autotest', 'little ghost'],
+                'keyword_match_type': 'contains',
+                'keyword_logic': 'any',
+                'exclusions': ['ignore_me'],
+                'exclusion_match_type': 'contains',
+                'exclusion_logic': 'any',
+            },
+            {
+                'label': 'specific_all',
+                'keywords': ['ghost crew', 'ready'],
+                'keyword_match_type': 'specific',
+                'keyword_logic': 'all',
+                'exclusions': ['skip'],
+                'exclusion_match_type': 'specific',
+                'exclusion_logic': 'all',
+            },
+        ]
 
-    async def _run_broadcast(self, ctx: CommandContext, record) -> None:
-        groups = self._fetch_groups(ctx.userbot_id)
-        targets = [int(row['telegram_group_id']) for row in groups[:3]] or [0]
+        for idx, case in enumerate(cases, start=1):
+            target = target_pool[min(idx - 1, len(target_pool) - 1)]
+            details = {
+                'targets': [target],
+                'keywords': case['keywords'],
+                'exclusions': case['exclusions'],
+                'reply_text': f"[AUTOTEST {case['label']}] response 👻",
+                'scope': 'custom',
+                'keyword_match_type': case['keyword_match_type'],
+                'keyword_logic': case['keyword_logic'],
+                'exclusion_match_type': case['exclusion_match_type'],
+                'exclusion_logic': case['exclusion_logic'],
+            }
+            note = f"Case {idx}: {case['label']} → chat {target}"
+            await record('auto_reply', 'running', note, {'case': case, 'scope': scope})
+            sub_ctx = self._sub_context(ctx, f"auto_test.auto_reply.{case['label']}", details)
+            handle = await self._registry['auto_reply'].start(sub_ctx)
+            if handle:
+                await asyncio.sleep(2)
+                await self._registry['auto_reply'].stop(handle, sub_ctx)
+            await record('auto_reply', 'completed', f"Case {idx}: {case['label']} selesai")
+
+    async def _run_watcher(self, ctx: CommandContext, record, target_pool: List[int], scope: str) -> None:
+        if not target_pool:
+            raise RuntimeError('No chats available for watcher dry run.')
+
+        cases = [
+            {
+                'label': 'contains_any',
+                'keywords': ['watch_me', 'alert'],
+                'keyword_match_type': 'contains',
+                'keyword_logic': 'any',
+                'exclusions': ['mute'],
+                'exclusion_match_type': 'contains',
+                'exclusion_logic': 'any',
+            },
+            {
+                'label': 'specific_all',
+                'keywords': ['alert', 'team'],
+                'keyword_match_type': 'specific',
+                'keyword_logic': 'all',
+                'exclusions': ['mute', 'later'],
+                'exclusion_match_type': 'specific',
+                'exclusion_logic': 'all',
+            },
+        ]
+
+        for idx, case in enumerate(cases, start=1):
+            target = target_pool[min(idx - 1, len(target_pool) - 1)]
+            details = {
+                'targets': [target],
+                'keywords': case['keywords'],
+                'exclusions': case['exclusions'],
+                'destination': {'mode': 'local', 'sheet_ref': None},
+                'label': f"AutoTest Watcher {case['label']}",
+                'scope': 'custom',
+                'keyword_match_type': case['keyword_match_type'],
+                'keyword_logic': case['keyword_logic'],
+                'exclusion_match_type': case['exclusion_match_type'],
+                'exclusion_logic': case['exclusion_logic'],
+            }
+            note = f"Case {idx}: {case['label']} → chat {target}"
+            await record('watcher', 'running', note, {'case': case, 'scope': scope})
+            sub_ctx = self._sub_context(ctx, f"auto_test.watcher.{case['label']}", details)
+            handle = await self._registry['watcher'].start(sub_ctx)
+            if handle:
+                await asyncio.sleep(2)
+                await self._registry['watcher'].stop(handle, sub_ctx)
+            await record('watcher', 'completed', f"Case {idx}: {case['label']} selesai")
+
+    async def _run_broadcast(self, ctx: CommandContext, record, target_pool: List[int], scope: str) -> None:
+        if not target_pool:
+            raise RuntimeError('No chats available for broadcast dry run.')
+
+        targets = target_pool[:3] or [target_pool[0]]
         details = {
             'mode': 'manual',
             'content': {'type': 'text', 'text': '[AUTOTEST] broadcast ping'},
@@ -118,7 +182,7 @@ class AutomatedTestingCommand(UserbotCommand):
             'targets': targets,
             'scope': 'custom',
         }
-        await record('broadcast', 'running', f"Targets: {len(targets)}")
+        await record('broadcast', 'running', f"Targets: {len(targets)}", {'scope': scope})
         sub_ctx = self._sub_context(ctx, 'auto_test.broadcast', details)
         await self._registry['broadcast'].start(sub_ctx)
         await record('broadcast', 'completed', 'Dry run completed')
@@ -172,6 +236,19 @@ class AutomatedTestingCommand(UserbotCommand):
             return [dict(row) for row in rows]
         finally:
             conn.close()
+
+    def _resolve_target_pool(self, userbot_id: int, scope: str, raw_targets: List[Any]) -> List[int]:
+        if scope == 'custom':
+            targets: List[int] = []
+            for item in raw_targets or []:
+                try:
+                    targets.append(int(item))
+                except (TypeError, ValueError):
+                    continue
+            return targets
+
+        groups = self._fetch_groups(userbot_id)
+        return [int(row['telegram_group_id']) for row in groups]
 
 
 def build_command(registry: Dict[str, UserbotCommand]) -> UserbotCommand:

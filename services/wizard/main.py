@@ -26,7 +26,7 @@ from telethon.errors import SessionPasswordNeededError
 
 from .commands import build_command_registry
 from .commands.base import CommandDependencies, WizardCommand
-from .commands.utils import create_task as enqueue_task
+from .commands.utils import create_task as enqueue_task, parse_custom_target_ids
 
 # Muat environment variables dari .env di root proyek
 load_dotenv()
@@ -175,6 +175,14 @@ ADMIN_MENU_MANAGE = "👷 Manage Userbot (WIP)"
 ADMIN_MENU_BACK = "⬅️ Back to Menu"
 ADMIN_MENU_KEYBOARD = [[ADMIN_MENU_TEST, ADMIN_MENU_MANAGE], [ADMIN_MENU_BACK]]
 ADMIN_MENU_MARKUP = ReplyKeyboardMarkup(ADMIN_MENU_KEYBOARD, resize_keyboard=True)
+
+AUTO_TEST_SCOPE_ALL = "Test all groups & channels"
+AUTO_TEST_SCOPE_CUSTOM = "Test specific groups/channels (enter IDs)"
+AUTO_TEST_SCOPE_MARKUP = ReplyKeyboardMarkup(
+    [[AUTO_TEST_SCOPE_ALL], [AUTO_TEST_SCOPE_CUSTOM], [ADMIN_MENU_BACK]],
+    resize_keyboard=True,
+)
+AUTO_TEST_ID_INPUT_MARKUP = ReplyKeyboardMarkup([[ADMIN_MENU_BACK]], resize_keyboard=True)
 
 ADMIN_MANAGE_SYNC = "📂 Sync Users Groups"
 ADMIN_MANAGE_BACK = "⬅️ Back to Admin"
@@ -461,13 +469,14 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data['admin_active'] = True
     context.user_data['admin_manage_active'] = False
     context.user_data.pop('admin_available_userbots', None)
+    _reset_auto_test_context(context)
 
     message = dedent(
         """
         ⚙️ *Admin Setting*
 
-        • `🧪 Automated Testing` — jalankan alur lengkap (Sync Groups → Auto Reply → Watcher → Broadcast) dalam mode dry-run dan simpan hasilnya.\n"
-        "• `👷 Manage Userbot (WIP)` — akses utilitas maintenance (sync seluruh grup, pembersihan data, dsb.).
+        • `🧪 Automated Testing` — jalankan alur lengkap (Sync Groups → Auto Reply → Watcher → Broadcast) dalam mode dry-run, pilih cakupan (`Test all groups & channels` atau `Test specific groups/channels`) dan simpan hasilnya ke log.
+        • `👷 Manage Userbot (WIP)` — akses utilitas maintenance (sync seluruh grup, pembersihan data, dsb.).
         """
     ).strip()
 
@@ -475,15 +484,116 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     log_outgoing(update.effective_user.id, message)
 
 
-def _start_auto_test_task(userbot_id: int) -> tuple[str, int]:
-    return enqueue_task(
-        userbot_id,
-        'auto_test',
-        {
-            'initiator': 'wizard_auto_test',
-            'requested_at': datetime.utcnow().isoformat(),
-        },
+def _start_auto_test_task(userbot_id: int, scope: str, targets: list[int] | None) -> tuple[str, int]:
+    details = {
+        'initiator': 'wizard_auto_test',
+        'requested_at': datetime.utcnow().isoformat(),
+        'testing_scope': scope,
+    }
+    if targets is not None:
+        details['testing_targets'] = targets
+    return enqueue_task(userbot_id, 'auto_test', details)
+
+
+def _reset_auto_test_context(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop('admin_auto_test', None)
+
+
+async def _begin_auto_test_flow(message, context: ContextTypes.DEFAULT_TYPE, selected: dict, user_id: int | None) -> None:
+    display_name = _format_userbot_name(selected)
+    context.user_data['admin_auto_test'] = {
+        'state': 'await_scope',
+        'userbot_id': selected['id'],
+        'display_name': display_name,
+    }
+    prompt = (
+        "🧪 *Automated Testing*\n"
+        f"Pilih cakupan pengujian untuk *{display_name}*.\n"
+        "Gunakan tombol di bawah, lalu lanjutkan langkahnya ya."
     )
+    await reply_markdown(message, prompt, AUTO_TEST_SCOPE_MARKUP)
+    if user_id is not None:
+        log_outgoing(user_id, prompt)
+
+
+async def _handle_admin_auto_test_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    auto_ctx = context.user_data.get('admin_auto_test') or {}
+    state = auto_ctx.get('state')
+    user_id = update.effective_user.id if update.effective_user else None
+
+    if state == 'await_scope':
+        if text == AUTO_TEST_SCOPE_ALL:
+            process_id, task_id = _start_auto_test_task(auto_ctx['userbot_id'], 'all', None)
+            display_name = auto_ctx.get('display_name', 'Userbot')
+            summary = (
+                f"Pengujian otomatis dijadwalkan untuk *{display_name}*.\n"
+                f"• Task ID: {task_id}\n"
+                f"• Process ID: `{process_id}`\n"
+                "• Scope: Semua grup & channel yang tersinkron\n"
+                "Lihat hasil di `logs/userbot/jobs/auto_test/{process_id}.log`."
+            )
+            _reset_auto_test_context(context)
+            await reply_markdown(update.message, summary, ADMIN_MENU_MARKUP)
+            if user_id is not None:
+                log_outgoing(user_id, summary)
+            return
+
+        if text == AUTO_TEST_SCOPE_CUSTOM:
+            auto_ctx['state'] = 'await_targets'
+            context.user_data['admin_auto_test'] = auto_ctx
+            prompt = (
+                "Ketik ID chat yang mau diuji, pisahkan dengan koma.\n"
+                "• Boleh pakai format biasa (`12345`) atau lengkap (`-10012345`).\n"
+                "• Contoh: `123456789,987654321`"
+            )
+            await reply_markdown(update.message, prompt, AUTO_TEST_ID_INPUT_MARKUP)
+            if user_id is not None:
+                log_outgoing(user_id, prompt)
+            return
+
+        reminder = "Gunakan tombol yang tersedia untuk memilih cakupan pengujian ya."
+        await reply_markdown(update.message, reminder, AUTO_TEST_SCOPE_MARKUP)
+        if user_id is not None:
+            log_outgoing(user_id, reminder)
+        return
+
+    if state == 'await_targets':
+        try:
+            targets = parse_custom_target_ids(text)
+        except ValueError as exc:
+            reminder = f"❌ {exc}"
+            await reply_markdown(update.message, reminder, AUTO_TEST_ID_INPUT_MARKUP)
+            if user_id is not None:
+                log_outgoing(user_id, reminder)
+            return
+
+        if not targets:
+            reminder = "❌ Masukkan minimal satu ID chat untuk diuji."
+            await reply_markdown(update.message, reminder, AUTO_TEST_ID_INPUT_MARKUP)
+            if user_id is not None:
+                log_outgoing(user_id, reminder)
+            return
+
+        process_id, task_id = _start_auto_test_task(auto_ctx['userbot_id'], 'custom', targets)
+        display_name = auto_ctx.get('display_name', 'Userbot')
+        summary = (
+            f"Pengujian otomatis dijadwalkan untuk *{display_name}*.\n"
+            f"• Task ID: {task_id}\n"
+            f"• Process ID: `{process_id}`\n"
+            f"• Scope: Custom ({len(targets)} chat)\n"
+            "Lihat hasil di `logs/userbot/jobs/auto_test/{process_id}.log`."
+        )
+        _reset_auto_test_context(context)
+        await reply_markdown(update.message, summary, ADMIN_MENU_MARKUP)
+        if user_id is not None:
+            log_outgoing(user_id, summary)
+        return
+
+    reminder = "Sesi automated testing direset. Silakan mulai lagi dari menu Admin."
+    _reset_auto_test_context(context)
+    await reply_markdown(update.message, reminder, ADMIN_MENU_MARKUP)
+    if user_id is not None:
+        log_outgoing(user_id, reminder)
 
 
 async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -501,14 +611,27 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await handle_admin_manage_text(update, context)
         return
 
+    auto_ctx = context.user_data.get('admin_auto_test')
+
     if text == ADMIN_MENU_BACK:
+        if auto_ctx:
+            _reset_auto_test_context(context)
+            response = "Sesi automated testing dibatalkan. Silakan pilih menu Admin lagi."
+            await reply_markdown(update.message, response, ADMIN_MENU_MARKUP)
+            log_outgoing(update.effective_user.id, response)
+            return
         context.user_data['admin_active'] = False
         response = "Kembali ke menu utama."
         await reply_markdown(update.message, response, MAIN_MENU_MARKUP)
         log_outgoing(update.effective_user.id, response)
         return
 
+    if auto_ctx:
+        await _handle_admin_auto_test_flow(update, context, text)
+        return
+
     if text == ADMIN_MENU_MANAGE:
+        _reset_auto_test_context(context)
         await show_admin_manage_menu(update, context)
         return
 
@@ -527,16 +650,7 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     if len(userbots) == 1:
         selected = userbots[0]
-        process_id, task_row_id = _start_auto_test_task(selected['id'])
-        display_name = _format_userbot_name(selected)
-        summary = (
-            f"Pengujian otomatis dijadwalkan untuk *{display_name}*.\n"
-            f"• Task ID: {task_row_id}\n"
-            f"• Process ID: `{process_id}`\n"
-            "Lihat hasil di `logs/userbot/jobs/auto_test/{process_id}.log`."
-        )
-        await reply_markdown(update.message, summary, ADMIN_MENU_MARKUP)
-        log_outgoing(update.effective_user.id, summary)
+        await _begin_auto_test_flow(update.message, context, selected, update.effective_user.id)
         return
 
     context.user_data['admin_available_userbots'] = userbots
@@ -545,7 +659,7 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         for row in userbots
     ]
 
-    prompt = "Pilih userbot yang ingin diuji:"
+    prompt = "Pilih userbot yang ingin diuji:" 
     await reply_markdown(update.message, prompt, InlineKeyboardMarkup(keyboard))
     log_outgoing(update.effective_user.id, prompt)
 
@@ -571,18 +685,8 @@ async def handle_admin_userbot_selection(update: Update, context: ContextTypes.D
         await query.edit_message_text("Userbot tidak ditemukan. Muat ulang menu Admin Setting.")
         return
 
-    process_id, task_row_id = _start_auto_test_task(userbot_id)
-    display_name = _format_userbot_name(selected)
-    log_message = (
-        f"Pengujian otomatis dijadwalkan untuk userbot *{display_name}*.\n"
-        f"• Task ID: {task_row_id}\n"
-        f"• Process ID: `{process_id}`\n"
-        "Hasil detail dapat dicek di `logs/userbot/jobs/auto_test/{process_id}.log`."
-    )
-
-    await query.edit_message_text("Pengujian otomatis dimulai. Lihat pesan terbaru untuk detailnya.")
-    await reply_markdown(query.message, log_message, ADMIN_MENU_MARKUP)
-    log_outgoing(query.from_user.id, log_message)
+    await query.edit_message_text("Pilih cakupan pengujian melalui tombol di bawah ini.")
+    await _begin_auto_test_flow(query.message, context, selected, query.from_user.id)
 
 
 async def show_admin_manage_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
