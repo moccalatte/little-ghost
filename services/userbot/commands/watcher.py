@@ -1,9 +1,11 @@
 """Watcher command implementation."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from zoneinfo import ZoneInfo
+from typing import Callable, List, Optional
 
 from telethon import events
 
@@ -24,16 +26,50 @@ class _WatcherState:
     exclusions: List[str]
     destination: dict
     label: str
+    keyword_match_type: str = "contains"
+    keyword_logic: str = "any"
+    exclusion_match_type: str = "contains"
+    exclusion_logic: str = "any"
     counter: int = 0
     sheet_recorder: Optional[GoogleSheetsRecorder] = None
+    _keyword_checks: List[Callable[[str, str], bool]] | None = None
+    _exclusion_checks: List[Callable[[str, str], bool]] | None = None
+
+    def __post_init__(self) -> None:
+        self._keyword_checks = [self._make_checker(word, self.keyword_match_type) for word in self.keywords]
+        self._exclusion_checks = [self._make_checker(word, self.exclusion_match_type) for word in self.exclusions]
+
+    def _make_checker(self, word: str, mode: str) -> Callable[[str, str], bool]:
+        if mode == "specific":
+            pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
+            return lambda original, _lowered: bool(pattern.search(original))
+        lowered_word = word.lower()
+        return lambda _original, lowered: lowered_word in lowered
 
     def match(self, text: str) -> bool:
         lowered = text.lower()
-        if not any(keyword in lowered for keyword in self.keywords):
+        keyword_hits = [check(text, lowered) for check in (self._keyword_checks or [])]
+        if not keyword_hits:
             return False
-        if self.exclusions and any(word in lowered for word in self.exclusions):
+
+        if self.keyword_logic == "all":
+            keywords_ok = all(keyword_hits)
+        else:
+            keywords_ok = any(keyword_hits)
+
+        if not keywords_ok:
             return False
-        return True
+
+        if not self._exclusion_checks:
+            return True
+
+        exclusion_hits = [check(text, lowered) for check in self._exclusion_checks]
+        if self.exclusion_logic == "all":
+            blocked = all(exclusion_hits)
+        else:
+            blocked = any(exclusion_hits)
+
+        return not blocked
 
 
 class WatcherCommand(UserbotCommand):
@@ -48,6 +84,10 @@ class WatcherCommand(UserbotCommand):
         exclusions = [str(item).strip().lower() for item in details.get("exclusions", []) if str(item).strip()]
         destination = details.get("destination") or {"mode": "local", "sheet_ref": None}
         label = details.get("label") or f"Watcher {ctx.process_id}" if ctx.process_id else "Watcher"
+        keyword_match_type = str(details.get("keyword_match_type") or "contains").lower()
+        keyword_logic = str(details.get("keyword_logic") or "any").lower()
+        exclusion_match_type = str(details.get("exclusion_match_type") or "contains").lower()
+        exclusion_logic = str(details.get("exclusion_logic") or "any").lower()
 
         if not targets or not keywords:
             logger.error("Data watcher tidak valid. targets=%s keywords=%s", targets, keywords)
@@ -122,6 +162,10 @@ class WatcherCommand(UserbotCommand):
             exclusions=exclusions,
             destination=destination,
             label=label,
+            keyword_match_type="specific" if keyword_match_type == "specific" else "contains",
+            keyword_logic="all" if keyword_logic == "all" else "any",
+            exclusion_match_type="specific" if exclusion_match_type == "specific" else "contains",
+            exclusion_logic="all" if exclusion_logic == "all" else "any",
             sheet_recorder=sheet_recorder,
         )
         handler = events.NewMessage(chats=targets)
@@ -136,7 +180,7 @@ class WatcherCommand(UserbotCommand):
                 return
 
             state.counter += 1
-            record_time = datetime.utcnow().isoformat()
+            record_time = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
             ctx.logger.info(
                 "Watcher match #%s at %s | chat=%s message_id=%s | pesan=%s",
                 state.counter,

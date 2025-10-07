@@ -129,22 +129,19 @@ little-ghost/
 ## 6. Command & Workflow
 
 ### 6.1 🤖 Auto Reply
-- The wizard guides the admin to select a target scope via buttons: `🌐 All Groups`, `📡 All Channels`, or `🎯 Specific Targets` (entering chat IDs without the `-100` prefix, with a brief tutorial on how to get the ID).
-- After that, the admin enters trigger keywords. A format like `need without nut` automatically adds an exclusion. The wizard also provides a button to add exclusions manually or skip it.
-- The final step is to write the reply message. The `⬅️ Back` button is always visible so the admin can return to the menu at any time.
-- The userbot attaches a `Telethon.events.NewMessage` handler per target, records each hit in `details.replied_count`, and saves the log to `logs/userbot/jobs/auto_reply/<process_id>.log`.
+- The wizard guides the admin to select a target scope via buttons: `🌐 All Groups`, `📡 All Channels`, or `🎯 Specific Targets` (enter the chat ID without the `-100` prefix; a short tip explains how to retrieve it).
+- After providing trigger keywords (formats such as `need without nut` automatically register exclusions), the wizard asks two follow-up questions: should the keywords match whole words or substrings, and do you require ALL or ANY of them? The same questions are repeated for exclusions so the admin can define AND/OR logic clearly.
+- The final step is to write the reply message. The `⬅️ Back` button is always present so the admin can return to the menu at any time.
+- The userbot installs a `Telethon.events.NewMessage` handler per target, tracks each hit in `details.replied_count`, and writes logs to `logs/userbot/jobs/auto_reply/<process_id>.log`.
 
 ### 6.2 👀 Watcher
-- The Watcher menu now offers two actions: `➕ Create Watcher` to create a new rule and `📜 Watcher Logs` to display a summary of the 8 most recent watcher tasks (status, total hits, Google Sheets and system error notes).
-- The watcher creation flow is similar to Auto Reply: select target scope, define keywords, and optionally add exclusions.
-- The wizard then asks for the logging destination (`🗂 Local Log` or `📄 Google Sheets`) and a watcher label. If Sheets is selected, the admin enters the sheet ID/URL; the wizard also displays a short tutorial:
-  1. Enable the Google Sheets API & create a Service Account.
-  2. Save the JSON credentials to `credentials/service_account.json` (an icon is provided in the project structure) — this folder is git-ignored, so it's safe to place local files there.
-  3. Share the sheet with the service account's email with editor access.
-- If the credential file name is different, the system automatically uses the only `.json` file in the `credentials/` folder or uses the `GOOGLE_SHEETS_CREDENTIAL_FILE` env var to point to a specific file.
-- Configuration data (keywords, exclusions, destination) is stored in the `details` column; when Sheets mode is active, the backend adds `destination.resolved` metadata with the spreadsheet and worksheet title for easy auditing from the log menu.
-- The userbot monitors new messages according to the rules and logs matches to `logs/userbot/jobs/watcher/<process_id>.log` complete with metadata (chat id, message content).
-- For Google Sheets mode, the system ensures the header row (`sender_username`, `sender_telegram_id`, `message`, `group_name`, `timestamp_utc`, `process_id`, `label`, `chat_id`, `message_id`) is created automatically if the sheet is empty. Each hit writes this data; if a failure occurs (credentials, permissions, sheet not found, etc.), the job status changes to error and the `details.last_sheet_error` column stores the source message.
+- The Watcher menu offers two actions: `➕ Create Watcher` to define a new rule and `📜 Watcher Logs` to recap the eight most recent runs (status, total matches, Google Sheets/system errors).
+- Its creation flow mirrors Auto Reply: select target scope, supply keywords, pick the match style (specific word vs substring), and decide whether ANY or ALL keywords/exclusions must be present.
+- The wizard then asks for the logging destination (`🗂 Local Log` or `📄 Google Sheets`) and a label. When Sheets mode is chosen, it reminds the admin to enable the Google Sheets API, store JSON credentials in `credentials/service_account.json` (folder ignored by git), and share the sheet with the service account email.
+- If the credential filename differs, the backend picks the single `.json` in `credentials/` or respects `GOOGLE_SHEETS_CREDENTIAL_FILE`.
+- Configuration (keywords, exclusions, destination) lives in the `details` column; Sheets mode augments it with `destination.resolved` metadata describing the spreadsheet and worksheet.
+- The userbot monitors new messages in line with the rule and logs matches to `logs/userbot/jobs/watcher/<process_id>.log` with metadata (chat id, snippet). When recording to Sheets, timestamps are exported in the Asia/Jakarta timezone.
+- The recorder ensures the header row (`sender_username`, `sender_telegram_id`, `message`, `group_name`, `timestamp_utc`, `process_id`, `label`, `chat_id`, `message_id`) exists. Failures (missing credentials, permission errors, missing sheet, etc.) mark the job as error and persist the message in `details.last_sheet_error`.
 
 ### 6.3 📢 Broadcast
 - The broadcast conversation is divided into several guided steps:
@@ -170,8 +167,10 @@ little-ghost/
 - Displays a summary of the `Manage Userbot` buttons, tips on re-running /menu, and the location of conversation logs (`logs/wizard/users/<telegram_id>.log`).
 
 ### 6.8 Admin Auto Test
-- The `auto_test` task runs the sequence: Sync Groups → Auto Reply → Watcher → Broadcast in dry-run mode. For broadcast, the content is sent as a manual message so the latest flow is still validated.
-- Each step is logged to `details.auto_test` and to the file `logs/userbot/jobs/auto_test/<process_id>.log` to facilitate regression debugging.
+- The `auto_test` task runs Sync Groups → Auto Reply → Watcher → Broadcast in dry-run mode (broadcast uses a manual message so nothing is sent live).
+- Before scheduling, the wizard asks whether to exercise `Test all groups & channels` or to supply specific chat IDs; custom IDs are expanded to full Telegram IDs with the `-100` prefix.
+- The routine covers two Auto Reply and two Watcher cases (contains/any and specific/all, each with different exclusions) so every rule combination is validated.
+- Each step is recorded in `details.auto_test` and mirrored to `logs/userbot/jobs/auto_test/<process_id>.log` for regression debugging.
 
 ---
 

@@ -1,8 +1,9 @@
 """Auto reply command implementation."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import List
+from typing import Callable, List
 
 from telethon import events
 
@@ -15,15 +16,49 @@ class _AutoReplyState:
     exclusions: List[str]
     reply_text: str
     me_id: int | None
+    keyword_match_type: str = "contains"
+    keyword_logic: str = "any"
+    exclusion_match_type: str = "contains"
+    exclusion_logic: str = "any"
     counter: int = 0
+    _keyword_checks: List[Callable[[str, str], bool]] | None = None
+    _exclusion_checks: List[Callable[[str, str], bool]] | None = None
+
+    def __post_init__(self) -> None:
+        self._keyword_checks = [self._make_checker(word, self.keyword_match_type) for word in self.keywords]
+        self._exclusion_checks = [self._make_checker(word, self.exclusion_match_type) for word in self.exclusions]
+
+    def _make_checker(self, word: str, mode: str) -> Callable[[str, str], bool]:
+        if mode == "specific":
+            pattern = re.compile(rf"\b{re.escape(word)}\b", re.IGNORECASE)
+            return lambda original, _lowered: bool(pattern.search(original))
+        lowered_word = word.lower()
+        return lambda _original, lowered: lowered_word in lowered
 
     def match(self, text: str) -> bool:
         lowered = text.lower()
-        if any(keyword in lowered for keyword in self.keywords):
-            if self.exclusions and any(word in lowered for word in self.exclusions):
-                return False
+        keyword_hits = [check(text, lowered) for check in (self._keyword_checks or [])]
+        if not keyword_hits:
+            return False
+
+        if self.keyword_logic == "all":
+            keywords_ok = all(keyword_hits)
+        else:
+            keywords_ok = any(keyword_hits)
+
+        if not keywords_ok:
+            return False
+
+        if not self._exclusion_checks:
             return True
-        return False
+
+        exclusion_hits = [check(text, lowered) for check in self._exclusion_checks]
+        if self.exclusion_logic == "all":
+            blocked = all(exclusion_hits)
+        else:
+            blocked = any(exclusion_hits)
+
+        return not blocked
 
 
 class AutoReplyCommand(UserbotCommand):
@@ -37,6 +72,10 @@ class AutoReplyCommand(UserbotCommand):
         keywords = [str(item).strip().lower() for item in details.get("keywords", []) if str(item).strip()]
         exclusions = [str(item).strip().lower() for item in details.get("exclusions", []) if str(item).strip()]
         reply_text = (details.get("reply_text") or "").strip()
+        keyword_match_type = str(details.get("keyword_match_type") or "contains").lower()
+        keyword_logic = str(details.get("keyword_logic") or "any").lower()
+        exclusion_match_type = str(details.get("exclusion_match_type") or "contains").lower()
+        exclusion_logic = str(details.get("exclusion_logic") or "any").lower()
 
         if not targets or not keywords or not reply_text:
             logger.error("Data auto reply belum lengkap. targets=%s keywords=%s reply=%s", targets, keywords, bool(reply_text))
@@ -44,7 +83,16 @@ class AutoReplyCommand(UserbotCommand):
             return None
 
         me = await ctx.client.get_me()
-        state = _AutoReplyState(keywords=keywords, exclusions=exclusions, reply_text=reply_text, me_id=getattr(me, "id", None))
+        state = _AutoReplyState(
+            keywords=keywords,
+            exclusions=exclusions,
+            reply_text=reply_text,
+            me_id=getattr(me, "id", None),
+            keyword_match_type="specific" if keyword_match_type == "specific" else "contains",
+            keyword_logic="all" if keyword_logic == "all" else "any",
+            exclusion_match_type="specific" if exclusion_match_type == "specific" else "contains",
+            exclusion_logic="all" if exclusion_logic == "all" else "any",
+        )
 
         handler = events.NewMessage(chats=targets)
 

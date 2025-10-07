@@ -16,6 +16,7 @@ The system consists of two main components:
 - **Detailed Logging**: Activities are logged to files for easy debugging.
 - **Per-Admin Conversation Logs**: Every wizard interaction is saved in `logs/wizard/users/{telegram_id}.log` for easy review.
 - **Automated QA**: The Admin menu provides sequential automated testing to ensure all userbot commands remain functional after changes.
+- **Keyword Rules 🎯**: Auto Reply & Watcher now support word-specific matches, AND/OR combinations, and a kid-friendly wizard flow to configure them safely.
 
 ---
 
@@ -72,7 +73,7 @@ The script performs the following actions:
 4. Runs the **Wizard Bot** and **Userbot Service** in parallel with different PIDs.
 5. Displays combined logs (`logs/wizard.log`, `logs/userbot.log`).
 
-Press `Ctrl+C` at any time, and the script will stop both services cleanly.
+Need longer log tails? Use `./scripts/dev.sh --follow-logs` or switch to `./scripts/dev_dre.sh` for an interactive run that stays attached until you press `Ctrl+C`.
 
 ---
 
@@ -88,9 +89,13 @@ Press `Ctrl+C` at any time, and the script will stop both services cleanly.
 
 ### Step 3: Manage the Userbot
 1. Select **"🛠️ Manage Userbot"** and choose the userbot you want to manage.
-2. The reply keyboard will show command buttons: `🤖 Auto Reply`, `👀 Watcher`, `📢 Broadcast`, `📊 Job Status`, `⛔ Stop Jobs`, `🆘 Help`, and navigation options.
-3. Each button starts a short conversation to guide you step-by-step.
-4. The wizard saves instructions to the `tasks` table, and the Userbot Service executes them asynchronously.
+2. The reply keyboard shows command buttons such as `🤖 Auto Reply`, `👀 Watcher`, `📢 Broadcast`, `📊 Job Status`, `⛔ Stop Jobs`, and navigation options.
+3. Each flow guides you step by step—Auto Reply and Watcher now ask whether keywords should match whole words or substrings and whether you require ALL or ANY matches before executing.
+4. The wizard saves instructions to the `tasks` table, and the Userbot Service executes them asynchronously. Use `📜 Watcher Logs` for quick summaries of recent watcher runs.
+
+### Admin Extras
+- `🧪 Automated Testing` lets you dry-run the core commands. Pick `Test all groups & channels` or enter specific IDs, and the system will validate both relaxed and strict keyword rules.
+- `👷 Manage Userbot (WIP)` currently ships with `📂 Sync Users Groups` to refresh the cached chat list and append results to `logs/admin/sync_<telegram_id>.log`.
 
 ---
 
